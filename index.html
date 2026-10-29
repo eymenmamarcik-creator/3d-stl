@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Baskı Studio & STL Viewer</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --panel: #161b22;
+            --border: #30363d;
+            --accent: #2f81f7;
+            --text: #c9d1d9;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #viewport {
+            flex: 1;
+            height: 100%;
+            position: relative;
+        }
+
+        #sidebar {
+            width: 320px;
+            background-color: var(--panel);
+            border-left: 1px solid var(--border);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            box-sizing: border-box;
+            overflow-y: auto;
+        }
+
+        h2 { font-size: 1.2rem; margin-top: 0; color: #fff; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        label { font-size: 0.85rem; color: #8b949e; }
+
+        input[type="file"], input[type="number"], select {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: #fff;
+            padding: 8px;
+            border-radius: 6px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .stats-box {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 12px;
+            font-size: 0.9rem;
+        }
+
+        .stats-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 6px;
+        }
+
+        .stats-row:last-child { margin-bottom: 0; }
+        .val { font-weight: bold; color: var(--accent); }
+
+        .btn {
+            background-color: #238636;
+            color: white;
+            border: none;
+            padding: 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: 0.2s;
+        }
+
+        .btn:hover { background-color: #2ea043; }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.8);
+            padding: 15px 25px;
+            border-radius: 8px;
+            display: none;
+        }
+    </style>
+
+    <!-- Three.js ve STL Loader -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+</head>
+<body>
+
+    <div id="viewport">
+        <div id="loading">Model Yükleniyor...</div>
+    </div>
+
+    <div id="sidebar">
+        <h2>🛠️ 3D Baskı Studio</h2>
+
+        <div class="control-group">
+            <label>STL Dosyası Yükle:</label>
+            <input type="file" id="file-input" accept=".stl">
+        </div>
+
+        <div class="control-group">
+            <label>Filament Tipi:</label>
+            <select id="material">
+                <option value="1.24">PLA (1.24 g/cm³)</option>
+                <option value="1.04">ABS (1.04 g/cm³)</option>
+                <option value="1.27">PETG (1.27 g/cm³)</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label>Doluluk Oranı (% Infill):</label>
+            <input type="number" id="infill" value="20" min="5" max="100">
+        </div>
+
+        <div class="control-group">
+            <label>Filament Kg Fiyatı (TL):</label>
+            <input type="number" id="price" value="600">
+        </div>
+
+        <div class="stats-box">
+            <div class="stats-row"><span>X Boyutu:</span><span class="val" id="dim-x">-</span></div>
+            <div class="stats-row"><span>Y Boyutu:</span><span class="val" id="dim-y">-</span></div>
+            <div class="stats-row"><span>Z Boyutu:</span><span class="val" id="dim-z">-</span></div>
+        </div>
+
+        <div class="stats-box">
+            <div class="stats-row"><span>Tahmini Ağırlık:</span><span class="val" id="weight">-</span></div>
+            <div class="stats-row"><span>Tahmini Maliyet:</span><span class="val" id="cost">-</span></div>
+        </div>
+
+        <button class="btn" onclick="addDemoCube()">Örnek Küp Yükle</button>
+    </div>
+
+    <script>
+        // 3D Sahne Kurulumu
+        const container = document.getElementById('viewport');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0d1117);
+
+        const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+        camera.position.set(100, 100, 100);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        // Işıklandırma
+        const ambientLight = new THREE.AmbientLight(0x666666);
+        scene.add(ambientLight);
+
+        const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight1.position.set(1, 1, 1);
+        scene.add(dirLight1);
+
+        const dirLight2 = new THREE.DirectionalLight(0x555555, 0.5);
+        dirLight2.position.set(-1, -1, -1);
+        scene.add(dirLight2);
+
+        // Izgara (Grid)
+        const grid = new THREE.GridHelper(200, 20, 0x30363d, 0x21262d);
+        scene.add(grid);
+
+        let currentMesh = null;
+
+        // STL Yükleyici
+        const loader = new THREE.STLLoader();
+
+        document.getElementById('file-input').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            document.getElementById('loading').style.display = 'block';
+            const reader = new FileReader();
+            
+            reader.onload = function(event) {
+                const geometry = loader.parse(event.target.result);
+                displayGeometry(geometry);
+                document.getElementById('loading').style.display = 'none';
+            };
+            
+            reader.readAsArrayBuffer(file);
+        });
+
+        function displayGeometry(geometry) {
+            if (currentMesh) scene.remove(currentMesh);
+
+            const material = new THREE.MeshStandardMaterial({
+                color: 0x2f81f7,
+                roughness: 0.4,
+                metalness: 0.2
+            });
+
+            currentMesh = new THREE.Mesh(geometry, material);
+
+            // Modeli merkeze al
+            geometry.computeBoundingBox();
+            const box = geometry.boundingBox;
+            const center = new THREE.Vector3();
+            box.getCenter(center);
+            geometry.center();
+
+            // Boyutlar
+            const size = new THREE.Vector3();
+            box.getSize(size);
+
+            document.getElementById('dim-x').innerText = size.x.toFixed(1) + ' mm';
+            document.getElementById('dim-y').innerText = size.y.toFixed(1) + ' mm';
+            document.getElementById('dim-z').innerText = size.z.toFixed(1) + ' mm';
+
+            // Z eksenini ızgara üstüne getir
+            currentMesh.position.y = size.z / 2;
+
+            scene.add(currentMesh);
+            calculateCost(geometry, size);
+        }
+
+        function calculateCost(geometry, size) {
+            const volumeCm3 = (size.x * size.y * size.z) / 1000;
+            const infill = parseFloat(document.getElementById('infill').value) / 100;
+            const density = parseFloat(document.getElementById('material').value);
+            const pricePerKg = parseFloat(document.getElementById('price').value);
+
+            const estimatedWeight = volumeCm3 * density * (infill * 0.4 + 0.1); 
+            const estimatedCost = (estimatedWeight / 1000) * pricePerKg;
+
+            document.getElementById('weight').innerText = estimatedWeight.toFixed(1) + ' gram';
+            document.getElementById('cost').innerText = estimatedCost.toFixed(2) + ' TL';
+        }
+
+        function addDemoCube() {
+            const geometry = new THREE.BoxGeometry(40, 40, 40);
+            displayGeometry(geometry);
+        }
+
+        addDemoCube();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        });
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
